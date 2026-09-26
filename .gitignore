@@ -23,4 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
-Thumbs.db
+.env.*
+env
+server/.env
+Thumbs.db

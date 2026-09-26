@@ -107,10 +107,21 @@ Note: This document is automatically updated whenever a new feature is added or 
 --------------------------------------------------------------------------------
 8. AI TOUR BUILDER (/ai-builder)
 --------------------------------------------------------------------------------
-- Description: AI-powered itinerary generator.
+- Description: AI-powered dual-engine itinerary generator powered by Google Gemini API.
 - How It Works:
-  * Automated Itinerary Generation: Input travel duration, budget, and destination preferences 
-    to generate custom day-by-day itineraries.
+  * Dual Suggestion Architecture: Simultaneously generates two complete travel packages:
+    1. LagaTour Database Grounded: RAG-grounded with MySQL registered tourist spots, 
+       community safety scores, and coordinates.
+    2. Web Explorer & Culinary Trail: Sourced from web travel blogs, TripAdvisor, 
+       and internet foodie recommendations.
+  * Granular Time Slots: Every day is broken into Morning (08:00 AM - 12:00 PM), 
+    Afternoon (01:00 PM - 05:00 PM), and Evening/Night (05:30 PM - 09:30 PM) with 
+    specific activities, recommended spots, and local dining tips.
+  * Real MySQL Persistence: 1-click "Create Tour Package" button directly creates a 
+    real Tour Plan in the MySQL database (tour_plans and tour_plan_places_modified) 
+    with sequenced stops, accommodation details, and expenses.
+  * Intelligent Fallback Engine: Seamless multi-model fallback across Gemini 3.5, 
+    Gemini 3.8, and rule-based knowledge engine in case of API rate-limits.
 
 --------------------------------------------------------------------------------
 9. MESSAGING & INBOX (/chats)

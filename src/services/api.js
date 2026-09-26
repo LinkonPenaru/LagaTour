@@ -1379,8 +1379,23 @@ export const api = {
   async getActiveAnnouncements() {
     const res = await fetch(`${API_BASE_URL}/admin/announcements`);
     return await handleResponse(res);
+  },
+
+  // ===================== AI TOUR PACKAGE BUILDER =====================
+
+  /**
+   * Generate dual tour packages (LagaTour Database Grounded vs Web Explorer)
+   */
+  async buildAITourPackage(specs) {
+    const res = await fetch(`${API_BASE_URL}/ai/build-package`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(specs)
+    });
+    return await handleResponse(res);
   }
 };
 
 export default api;
+
 
