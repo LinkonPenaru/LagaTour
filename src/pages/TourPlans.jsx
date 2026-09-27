@@ -515,10 +515,10 @@ export default function TourPlans() {
 
       {/* ===================== TAB 2: LIVE TRACKING COCKPIT ===================== */}
       {activeTab === "live_tracker" && (
-        activeExpedition ? (
+        (focusedExpedition || activeExpedition) ? (
           <div className="space-y-4">
             <LiveExpeditionTracker 
-              expedition={activeExpedition} 
+              expedition={focusedExpedition || activeExpedition} 
               onBack={() => setActiveTab("expeditions")}
               onCreateNew={handleOpenCreateModal}
             />

@@ -36,6 +36,7 @@ import confetti from "canvas-confetti";
 
 export default function LiveExpeditionTracker({ expedition, onBack = null, onCreateNew = null }) {
   const { 
+    startExpedition,
     checkInStop, 
     skipStop, 
     addSpontaneousDiscovery, 
@@ -64,6 +65,7 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
   const [spontBadge, setSpontBadge] = useState("Hidden Gem");
   const [spontNotes, setSpontNotes] = useState("");
   const [spontExpense, setSpontExpense] = useState("");
+  const [spontInsertAfterId, setSpontInsertAfterId] = useState("");
 
   // Quick Expense Modal
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -86,7 +88,7 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
   // Map selected stop
   const [selectedStop, setSelectedStop] = useState(null);
 
-  if (!expedition || expedition.status !== "ongoing") {
+  if (!expedition) {
     return (
       <div className="card bg-base-100 border border-base-300 p-8 md:p-12 rounded-3xl text-center space-y-6 shadow-sm max-w-3xl mx-auto my-4">
         <div className="w-20 h-20 rounded-3xl bg-primary/10 text-primary flex items-center justify-center mx-auto shadow-inner">
@@ -97,10 +99,10 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
             📡 Live Cockpit Standby
           </span>
           <h2 className="text-2xl md:text-3xl font-black tracking-tight text-base-content m-0">
-            No Live Expedition in Progress
+            No Tour Plan Selected
           </h2>
           <p className="text-sm text-base-content/60 max-w-lg mx-auto leading-relaxed">
-            The live tracking cockpit activates in real time with interactive GPS maps, check-ins, and expense meters when an expedition is started. All previous tours have ended and are safely stored in your Completed History.
+            Select a tour plan from the Expeditions tab or click "Start Tour" to manage and track your live itinerary.
           </p>
         </div>
 
@@ -145,12 +147,25 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
     );
   }
 
-  const stops = expedition.stops || [];
+  // Normalize stops to ensure all properties exist for robust rendering and mapping
+  const stops = (expedition.stops || []).map((s, idx) => ({
+    ...s,
+    id: s.id || s.tour_plan_place_id || `stop_${idx}`,
+    placeName: s.placeName || s.place_name || s.name || s.location || `Stop ${idx + 1}`,
+    location: s.location || s.placeName || s.place_name || "",
+    lat: Number(s.lat ?? s.latitude ?? 23.8103),
+    lng: Number(s.lng ?? s.longitude ?? 90.4125),
+    transportMode: s.transportMode || s.transport_mode || "Bus",
+    transportCost: Number(s.transportCost || s.transport_cost || 0),
+    accommodationType: s.accommodationType || s.accommodation_type || "Hotel",
+    accommodationCost: Number(s.accommodationCost || s.accommodation_cost || 0),
+    status: s.status || "pending"
+  }));
   const checkedStops = stops.filter(s => s.status === "checked_in");
   const spontaneousStops = stops.filter(s => s.isSpontaneous);
   const expenses = expedition.expenses || [];
   const totalSpent = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  const budgetPercentage = Math.min(100, Math.round((totalSpent / expedition.targetBudget) * 100));
+  const budgetPercentage = Math.min(100, Math.round((totalSpent / (expedition.targetBudget || 1)) * 100));
 
   // Current target stop (first non-checked-in, non-skipped stop)
   const currentTargetStop = stops.find(s => s.status === "pending") || null;
@@ -232,9 +247,15 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
     e.preventDefault();
     if (!spontPlaceName.trim()) return;
 
+    const lastChecked = [...stops].reverse().find(s => s.status === 'checked_in') || stops[0];
+    const targetRefId = spontInsertAfterId || lastChecked?.id;
+    const targetRefStop = stops.find(s => s.id === targetRefId);
+
     addSpontaneousDiscovery(expedition.id, {
       placeName: spontPlaceName,
       location: spontLocation,
+      insertAfterStopId: targetRefId,
+      insertAfterOrder: targetRefStop?.order,
       transportMode: spontTransport,
       accommodationType: spontAccommodation,
       badge: spontBadge,
@@ -249,6 +270,7 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
     setSpontLocation("");
     setSpontNotes("");
     setSpontExpense("");
+    setSpontInsertAfterId("");
     setIsSpontaneousModalOpen(false);
   };
 
@@ -339,6 +361,32 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
                 >
                   <Trophy className="w-4 h-4" /> End Expedition
                 </button>
+              </>
+            ) : expedition.status === "planned" ? (
+              <>
+                <button 
+                  onClick={() => startExpedition(expedition.id)}
+                  className="btn btn-sm btn-primary text-primary-content font-black rounded-xl gap-1.5 shadow-lg shadow-primary/20 hover:scale-105 transition-all"
+                >
+                  <Navigation className="w-3.5 h-3.5" /> Start Expedition Now
+                </button>
+
+                <button 
+                  onClick={() => setIsEditModalOpen(true)}
+                  className="btn btn-sm btn-ghost border border-base-300 rounded-xl gap-1.5 font-bold text-xs"
+                  title="Edit Tour Plan"
+                >
+                  <Edit3 className="w-3.5 h-3.5" /> Modify Plan
+                </button>
+
+                {onCreateNew && (
+                  <button 
+                    onClick={onCreateNew}
+                    className="btn btn-sm btn-ghost border border-base-300 rounded-xl gap-1.5 font-bold text-xs"
+                  >
+                    <Plus className="w-4 h-4" /> Plan New
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -513,19 +561,32 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
             <div className="flex justify-between items-center border-b border-base-200 pb-3">
               <div>
                 <h3 className="text-sm font-black uppercase tracking-tight text-base-content flex items-center gap-1.5">
-                  <MapPin className="w-4 h-4 text-primary" /> Itinerary Stops Timeline
+                  <MapPin className="w-4 h-4 text-primary" /> Live Check-in Timeline
                 </h3>
-                <span className="text-[11px] text-base-content/50">Check in with live GPS coordinates as you travel</span>
+                <span className="text-[11px] text-base-content/50">Sequenced dynamically by your live check-in timeline</span>
               </div>
               <span className="badge badge-sm badge-neutral font-bold">{stops.length} Total Stops</span>
             </div>
 
             {/* Stepper Timeline */}
             <div className="space-y-4 max-h-[640px] overflow-y-auto pr-1">
-              {stops.map((stop, idx) => {
-                const isChecked = stop.status === "checked_in";
-                const isSkipped = stop.status === "skipped";
-                const isCurrent = currentTargetStop && currentTargetStop.id === stop.id;
+              {stops.length === 0 ? (
+                <div className="p-8 text-center bg-base-200/40 rounded-2xl border border-dashed border-base-300 space-y-3">
+                  <MapPin className="w-8 h-8 text-base-content/30 mx-auto" />
+                  <p className="text-xs font-bold text-base-content/70 m-0">No stops scheduled in itinerary</p>
+                  <p className="text-[11px] text-base-content/50 m-0">Click Modify Plan to add places and scenic destinations to this tour route.</p>
+                  <button 
+                    onClick={() => setIsEditModalOpen(true)}
+                    className="btn btn-xs btn-primary text-primary-content font-bold rounded-lg"
+                  >
+                    + Add Stops to Tour
+                  </button>
+                </div>
+              ) : (
+                stops.map((stop, idx) => {
+                  const isChecked = stop.status === "checked_in";
+                  const isSkipped = stop.status === "skipped";
+                  const isCurrent = currentTargetStop && currentTargetStop.id === stop.id;
 
                 return (
                   <div 
@@ -561,6 +622,16 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
                         </span>
 
                         <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black uppercase text-base-content/40 tracking-wider">
+                              Stop {idx + 1}
+                            </span>
+                            {isChecked && (
+                              <span className="badge badge-xs badge-success text-[9px] text-white font-extrabold py-0 px-1">
+                                Visited #{idx + 1}
+                              </span>
+                            )}
+                          </div>
                           <h4 className="font-black text-xs text-base-content leading-tight m-0">
                             {stop.placeName}
                           </h4>
@@ -642,7 +713,8 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
 
                   </div>
                 );
-              })}
+              })
+            )}
             </div>
 
           </div>
@@ -752,6 +824,29 @@ export default function LiveExpeditionTracker({ expedition, onBack = null, onCre
             </div>
 
             <form onSubmit={handleSpontaneousSubmit} className="space-y-3 text-xs">
+              {/* Route Position Selector */}
+              <div className="form-control bg-amber-500/10 p-2.5 rounded-2xl border border-amber-500/20 space-y-1">
+                <label className="label py-0">
+                  <span className="label-text text-[11px] font-black text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                    <Navigation className="w-3.5 h-3.5" /> Detour Route Position (Insert After)
+                  </span>
+                </label>
+                <select 
+                  className="select select-xs select-bordered w-full rounded-xl font-bold bg-base-100 text-xs"
+                  value={spontInsertAfterId || ([...stops].reverse().find(s => s.status === 'checked_in')?.id) || stops[0]?.id || ""}
+                  onChange={(e) => setSpontInsertAfterId(e.target.value)}
+                >
+                  {stops.map((s, idx) => (
+                    <option key={s.id} value={s.id}>
+                      Stop {idx + 1}: {s.placeName} {s.status === 'checked_in' ? '✓ (Completed)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-base-content/60 m-0 px-1">
+                  ✨ The spontaneous stop will be inserted right after this spot, and subsequent itinerary stops will shift forward (+1).
+                </p>
+              </div>
+
               <div className="form-control">
                 <label className="label py-0.5"><span className="label-text text-xs font-bold">Discovery Spot Name</span></label>
                 <input 

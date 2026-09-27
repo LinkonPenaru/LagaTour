@@ -146,6 +146,18 @@ export const api = {
   },
 
   /**
+   * Verify post media with AI visual moderation service
+   */
+  async verifyPostMedia(mediaItems, destination = "") {
+    const res = await fetch(`${API_BASE_URL}/posts/verify-media`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ media: mediaItems, destination })
+    });
+    return await handleResponse(res);
+  },
+
+  /**
    * Like / Unlike a post
    */
   async likePost(postId, user) {
@@ -1388,6 +1400,18 @@ export const api = {
    */
   async buildAITourPackage(specs) {
     const res = await fetch(`${API_BASE_URL}/ai/build-package`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(specs)
+    });
+    return await handleResponse(res);
+  },
+
+  /**
+   * Generate AI Tour Plans (Mode 1: Destination Max Spots, Mode 2: Nearby Sequenced Expedition)
+   */
+  async generateAITourPlans(specs) {
+    const res = await fetch(`${API_BASE_URL}/ai/generate-plans`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(specs)

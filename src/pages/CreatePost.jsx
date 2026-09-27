@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { usePosts } from "../context/PostContext";
 import api from "../services/api";
+import { verifyImageContent } from "../utils/imageModeration";
 import { 
   Image as ImageIcon, 
   Video as VideoIcon, 
@@ -207,17 +208,43 @@ export default function CreatePost() {
       return;
     }
 
-    // Start AI Verification Simulation
+    // Start AI Verification
     setIsVerifying(true);
     setVerifyStep(1);
 
-    await new Promise(res => setTimeout(res, 1000));
-    setVerifyStep(2);
+    // AI Check: Inspect uploaded photos for realism, tourism context & community safety
+    if (photoItems.length > 0) {
+      // 1. Client-side pixel & color analysis (detects clip art, illustrations, documents, NSFW, indoor selfies)
+      for (const photo of photoItems) {
+        const clientRes = await verifyImageContent(photo.url);
+        if (!clientRes.isApproved) {
+          setIsVerifying(false);
+          setVerifyError(clientRes.reason);
+          return;
+        }
+      }
 
-    await new Promise(res => setTimeout(res, 1000));
+      setVerifyStep(2);
+
+      // 2. Server-side AI verification (Gemini Vision AI / Server buffer analysis)
+      try {
+        const serverCheck = await api.verifyPostMedia(photoItems, finalDestination);
+        const serverRejected = (serverCheck?.results || []).filter(r => !r.isApproved);
+        if (serverRejected.length > 0) {
+          setIsVerifying(false);
+          setVerifyError(serverRejected[0].reason);
+          return;
+        }
+      } catch (err) {
+        console.warn("Backend verification check:", err.message);
+      }
+    } else {
+      setVerifyStep(2);
+      await new Promise(res => setTimeout(res, 600));
+    }
+
     setVerifyStep(3);
-
-    await new Promise(res => setTimeout(res, 800));
+    await new Promise(res => setTimeout(res, 500));
 
     // Create post in PostContext with multiple images and videos
     const authorUser = currentUser || {
@@ -227,28 +254,34 @@ export default function CreatePost() {
       league: "Explorer"
     };
 
-    await createPost({
-      author: authorUser,
-      caption: caption.trim(),
-      images: photoItems.map(p => p.url),
-      videos: videoItems.map(v => v.url),
-      destination: finalDestination
-    });
+    try {
+      await createPost({
+        author: authorUser,
+        caption: caption.trim(),
+        images: photoItems.map(p => p.url),
+        videos: videoItems.map(v => v.url),
+        destination: finalDestination
+      });
 
-    // Award points and show celebration
-    const result = addPoints(50);
-    confetti({
-      particleCount: 140,
-      spread: 80,
-      origin: { y: 0.6 }
-    });
+      // Award points and show celebration
+      const result = addPoints(50);
+      confetti({
+        particleCount: 140,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
 
-    if (result?.leveledUp) {
-      alert(`🎉 LEAGUE UPGRADED! You are now a ${result.league}!`);
+      if (result?.leveledUp) {
+        alert(`🎉 LEAGUE UPGRADED! You are now a ${result.league}!`);
+      }
+
+      setIsVerifying(false);
+      navigate("/");
+    } catch (err) {
+      console.error("Failed to create post:", err);
+      setIsVerifying(false);
+      setVerifyError(err.message || "Failed to create post. Please check media.");
     }
-
-    setIsVerifying(false);
-    navigate("/");
   };
 
   return (

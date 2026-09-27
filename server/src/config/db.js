@@ -612,6 +612,7 @@ export async function initDatabase() {
 
       try {
         await p.query("ALTER TABLE tour_plan_places_modified MODIFY COLUMN place_id varchar(255) NULL");
+        await p.query("ALTER TABLE tour_plan_places_modified DROP FOREIGN KEY fk_tpp_place");
       } catch (e) {}
     } catch (tppAlterErr) {
       // safe fallback
@@ -984,6 +985,37 @@ async function seedInitialData(p) {
         ('plan_sreemangal_2d', 'user_nusrat', '2-Day Sreemangal Tea Trails & Hum Hum Trek', 'Explore the scenic rolling tea gardens of Sreemangal, Baikka Beel bird sanctuary, Lawachara forest, and 7-layer Nilkantha tea.', 'Sreemangal', 'Dhaka', 2, 'Train', 'Hostel', 4200.00, 'Take the Parabat Express train from Dhaka Kamalapur station. Hire a CNG auto for local spots.', 'Solo', 'Spring', 1, 1200, 180, 19, 4.80, 42, 95),
         ('plan_sundarbans_4d', 'user_farhana', '4-Day Sundarbans Deep Mangrove Cruiser Expedition', 'Sail into the untamed wilderness from Mongla port to Kotka, Hiron Point, and Kochikhali canal safaris.', 'Sundarbans', 'Khulna', 4, 'Multiple', 'Home_Stay', 14500.00, 'Carry binoculars for wildlife spotting. Follow Forest Department armed guard instructions at all times.', 'Couple', 'Winter', 1, 850, 125, 18, 4.75, 28, 80)
       ON DUPLICATE KEY UPDATE title = VALUES(title);
+    `);
+  }
+
+  // Seed stops for flagship tour plans if empty
+  const [planStopsCount] = await p.query("SELECT COUNT(*) as count FROM tour_plan_places_modified WHERE tour_plan_id IN ('plan_sajek_3d', 'plan_sreemangal_2d', 'plan_tanguar_2d', 'plan_stmartin_3d', 'plan_sundarbans_4d')");
+  if (planStopsCount[0].count < 5) {
+    console.log("🌱 Seeding sequenced stops for flagship tour plans into lagatour_db...");
+    await p.query(`
+      INSERT INTO tour_plan_places_modified (tour_plan_place_id, tour_plan_id, place_name, location, stop_order, latitude, longitude, transport_mode, transport_details, transport_cost, has_accommodation, accommodation_name, accommodation_cost, stay_duration, notes, photos, Expense)
+      VALUES
+        ('stop_sajek_1', 'plan_sajek_3d', 'Dighinala Army Camp & Chander Gari Stand', 'Khagrachari to Sajek', 1, 23.25000000, 92.05000000, '4x4 Chander Gari', 'Wait for morning military convoy escort departing at 10:00 AM sharp', 1500.00, 0, '', 0.00, 'Convoy Escort', 'Military convoy checkpoint. Carry NID photocopies.', '["https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=600"]', 1500.00),
+        ('stop_sajek_2', 'plan_sajek_3d', 'Ruilui Para Cultural Village', 'Sajek Valley, Rangamati', 2, 23.38200000, 92.29380000, '4x4 Chander Gari', 'Scenic mountain ride through cloud canopy', 500.00, 1, 'Megh Machang Eco Cottage', 2500.00, '1 Night', 'Stroll through indigenous Lusai and Tripura village settlements.', '["https://images.unsplash.com/photo-1627894483216-2138af692e32?w=600"]', 3000.00),
+        ('stop_sajek_3', 'plan_sajek_3d', 'Konglak Peak Cloud Viewpoint', 'Sajek Valley, Rangamati', 3, 23.40110000, 92.30150000, '4x4 Chander Gari', 'Early morning trek up the peak', 300.00, 0, '', 0.00, '3 Hours', 'Highest elevation point in Sajek. Breathtaking sea of clouds at sunrise.', '["https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600"]', 300.00),
+
+        ('stop_sreemangal_1', 'plan_sreemangal_2d', 'Lawachara National Rainforest', 'Kamalganj, Sreemangal', 1, 24.32670000, 91.78500000, 'Reserved CNG', 'Scenic drive through shaded tea plantations', 400.00, 0, '', 0.00, '3 Hours', 'Semi-evergreen rainforest canopy with hoolock gibbons and paved nature trails.', '["https://images.unsplash.com/photo-1448375240586-882707db888b?w=600"]', 400.00),
+        ('stop_sreemangal_2', 'plan_sreemangal_2d', 'Baikka Beel Wetland Bird Sanctuary', 'Hail Haor, Sreemangal', 2, 24.35400000, 91.68500000, 'Reserved CNG', 'Dirt track ride to wetland observation tower', 600.00, 0, '', 0.00, '2.5 Hours', 'Panoramic watch tower overlooking lotus blooms and winter migratory birds.', '["https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600"]', 600.00),
+        ('stop_sreemangal_3', 'plan_sreemangal_2d', 'Nilkantha 7-Layer Colored Tea Stall', 'Ramnagar, Sreemangal', 3, 24.29850000, 91.73420000, 'Electric Auto', 'Short 10-min ride from town center', 100.00, 1, 'Grand Sultan Tea Resort & Golf', 3500.00, '1 Night', 'Famous multi-layered tea created with secret spice blend and layers.', '["https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=600"]', 3600.00),
+
+        ('stop_tanguar_1', 'plan_tanguar_2d', 'Tahirpur Boat Ghat', 'Sunamganj Haor Basin', 1, 25.10500000, 91.17800000, 'Houseboat Cruise', 'Boarding luxury wooden houseboat', 2500.00, 1, 'Joltorongo Premium Haor Cruiser', 4000.00, '1 Night', 'Scenic houseboat cruise with fresh haor fish meals on board.', '["https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600"]', 6500.00),
+        ('stop_tanguar_2', 'plan_tanguar_2d', 'Niladri Blue Lake (Shahid Siraj Lake)', 'Tekerghat, Sunamganj', 2, 25.18500000, 91.11500000, 'Motorbike / Auto', 'Scenic lakeside trail against border hills', 300.00, 0, '', 0.00, '2 Hours', 'Mesmerizing turquoise blue water in abandoned limestone quarry.', '["https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600"]', 300.00),
+        ('stop_tanguar_3', 'plan_tanguar_2d', 'Shimul Bagan Red Cotton Forest', 'Jadukata River, Sunamganj', 3, 25.11200000, 91.13400000, 'Speedboat / Auto', 'Crossing Jadukata crystal river', 400.00, 0, '', 0.00, '2 Hours', 'Vast orchard of shimul trees blooming in vivid crimson during spring.', '["https://images.unsplash.com/photo-1448375240586-882707db888b?w=600"]', 400.00),
+
+        ('stop_stmartin_1', 'plan_stmartin_3d', 'Teknaf Ship Jetty & Naval Ghat', 'Teknaf, Cox\\'s Bazar', 1, 20.86530000, 92.29860000, 'Keari Sindbad Ship', 'Morning sea cruise departure at 9:30 AM', 1200.00, 0, '', 0.00, '2 Hours', 'Board Keari Sindbad or Bay Cruiser to Saint Martin. Carry NID copies.', '["https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600"]', 1200.00),
+        ('stop_stmartin_2', 'plan_stmartin_3d', 'Saint Martin\\'s West Beach & Coral View', 'St. Martin\\'s Island', 2, 20.62740000, 92.32250000, 'Cycle / Buggy', 'Scenic island cycling along coconut groves', 300.00, 1, 'Coral View Eco Resort', 2500.00, '2 Nights', 'Pristine white sand beach, fresh green coconut, and evening BBQ.', '["https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600"]', 2800.00),
+        ('stop_stmartin_3', 'plan_stmartin_3d', 'Chera Dwip Coral Sanctuary', 'Chera Dwip, St. Martin', 3, 20.60150000, 92.33800000, 'Speedboat', 'Low-tide speedboat crossing over living coral beds', 500.00, 0, '', 0.00, '3 Hours', 'Southernmost tip of Bangladesh. Colorful corals and crystal clear turquoise sea.', '["https://images.unsplash.com/photo-1448375240586-882707db888b?w=600"]', 500.00),
+
+        ('stop_sundarbans_1', 'plan_sundarbans_4d', 'Mongla Port & Forest Station', 'Mongla, Bagerhat', 1, 22.48330000, 89.60000000, 'Cruiser Ship', 'Boarding 3-tier deep mangrove exploration cruiser', 3000.00, 1, 'Sundarbans River Cruiser', 3500.00, '1 Night', 'Cruiser vessel embarkation with armed forest guards and naturalist guide.', '["https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600"]', 6500.00),
+        ('stop_sundarbans_2', 'plan_sundarbans_4d', 'Karamjal Eco Tourism & Wildlife Sanctuary', 'Karamjal, Sundarbans', 2, 22.42850000, 89.59360000, 'Launch', 'Wooden boardwalk tour through dense mangrove canopy', 500.00, 0, '', 0.00, '2 Hours', 'Spot spotted deer, estuarine crocodiles, and rhesus macaques.', '["https://images.unsplash.com/photo-1448375240586-882707db888b?w=600"]', 500.00),
+        ('stop_sundarbans_3', 'plan_sundarbans_4d', 'Kotka Wildlife Sanctuary & Jamtola Sea Beach', 'Kotka, Deep Sundarbans', 3, 21.85400000, 89.77500000, 'Canal Country Boat', 'Silent canal cruise for Bengal Tiger & deer spotting', 1200.00, 1, 'Tiger Trail Forest Cabin', 2500.00, '1 Night', 'Watch tower overlooking grassland deer herds and quiet ocean beach.', '["https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600"]', 3700.00),
+        ('stop_sundarbans_4', 'plan_sundarbans_4d', 'Hiron Point & Nilkamal Watch Tower', 'South Sundarbans', 4, 21.78330000, 89.46670000, 'Silent Wooden Boat', 'Dawn creek rowing for birdwatching & tiger footprints', 800.00, 0, '', 0.00, '3 Hours', 'UNESCO World Heritage core zone. High probability of wildlife sighting.', '["https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=600"]', 800.00)
+      ON DUPLICATE KEY UPDATE place_name = VALUES(place_name);
     `);
   }
 

@@ -6,8 +6,8 @@ import { getIO } from "../services/socketService.js";
  * Helper to ensure author user exists in DB
  */
 async function ensureUserExists(userData) {
-  if (!userData) return "user_anon";
-  const userId = userData.id || userData.user_id || `user_${Date.now()}`;
+  if (!userData) return "user_1";
+  const userId = userData.id || userData.user_id || `user_1`;
   const username = userData.username || userData.name?.toLowerCase().replace(/\s+/g, "_") || "traveler";
   const email = userData.email || `${username}@laga.tour`;
   const nameParts = (userData.name || username).split(" ");
@@ -33,6 +33,93 @@ async function ensureUserExists(userData) {
 }
 
 /**
+ * Format a single stop database row
+ */
+export function formatStopRow(s, idx = 0) {
+  let parsedPhotos = [];
+  if (s.photos) {
+    try {
+      parsedPhotos = typeof s.photos === "string" ? JSON.parse(s.photos) : s.photos;
+      if (!Array.isArray(parsedPhotos)) parsedPhotos = [parsedPhotos];
+    } catch (e) {
+      parsedPhotos = s.photos.split(",").map(p => p.trim()).filter(Boolean);
+    }
+  }
+
+  return {
+    id: s.tour_plan_place_id,
+    order: (idx !== null && idx !== undefined) ? (idx + 1) : (s.stop_order || 1),
+    placeId: s.place_id || null,
+    placeName: s.place_name || s.location || "Scenic Spot",
+    location: s.location || s.place_name || "",
+    lat: Number(s.latitude || 23.8103),
+    lng: Number(s.longitude || 90.4125),
+    transportMode: s.transport_mode || "Bus",
+    transportDetails: s.transport_details || "",
+    transportCost: Number(s.transport_cost || 0),
+    hasAccommodation: Boolean(s.has_accommodation),
+    accommodationType: s.accommodation_type || "Hotel",
+    accommodationName: s.accommodation_name || "",
+    accommodationCost: Number(s.accommodation_cost || 0),
+    accommodationDetails: s.accommodation_details || "",
+    stayDuration: s.stay_duration || "1 Night",
+    notes: s.notes || "",
+    status: s.status || "pending", // 'pending' | 'checked_in' | 'skipped' | 'planned'
+    isSpontaneous: Boolean(s.is_spontaneous),
+    discoveryBadge: s.discovery_badge || "",
+    checkInTime: s.check_in_time || null,
+    checkInGps: s.check_in_lat ? { lat: Number(s.check_in_lat), lng: Number(s.check_in_lng) } : null,
+    checkInNote: s.check_in_note || "",
+    photos: parsedPhotos,
+    expense: Number(s.Expense || s.expense || 0)
+  };
+}
+
+/**
+ * Sort stops dynamically: checked-in stops appear first ordered chronologically by check_in_time ASC,
+ * followed by pending/planned stops ordered by their scheduled stop_order ASC.
+ */
+export function sortAndFormatStops(stopsRaw = []) {
+  return [...stopsRaw]
+    .sort((a, b) => {
+      const aChecked = a.status === 'checked_in' && a.check_in_time;
+      const bChecked = b.status === 'checked_in' && b.check_in_time;
+      if (aChecked && bChecked) {
+        return new Date(a.check_in_time).getTime() - new Date(b.check_in_time).getTime();
+      }
+      if (aChecked && !bChecked) return -1;
+      if (!aChecked && bChecked) return 1;
+      return (a.stop_order || 0) - (b.stop_order || 0);
+    })
+    .map((s, idx) => formatStopRow(s, idx));
+}
+
+/**
+ * Automatically update database stop_order based on actual check-in sequence
+ */
+export async function resequenceTourStops(tourPlanId) {
+  const stops = await query(`
+    SELECT tour_plan_place_id, status, check_in_time, stop_order
+    FROM tour_plan_places_modified
+    WHERE tour_plan_id = ?
+    ORDER BY 
+      CASE WHEN status = 'checked_in' AND check_in_time IS NOT NULL THEN 0 ELSE 1 END ASC,
+      check_in_time ASC,
+      stop_order ASC
+  `, [tourPlanId]);
+
+  for (let i = 0; i < stops.length; i++) {
+    const newOrder = i + 1;
+    if (stops[i].stop_order !== newOrder) {
+      await query(
+        "UPDATE tour_plan_places_modified SET stop_order = ? WHERE tour_plan_place_id = ?",
+        [newOrder, stops[i].tour_plan_place_id]
+      );
+    }
+  }
+}
+
+/**
  * Shared Tour Plan Formatter
  * Transforms raw SQL rows into the rich frontend Expedition / Tour Plan model
  */
@@ -41,49 +128,9 @@ function formatTourPlan(plan, stops = [], companions = [], expenses = [], curren
   const authorAvatar = plan.profile_picture_url || `https://api.dicebear.com/7.x/adventurer/svg?seed=${plan.username || 'traveler'}`;
   const authorPoints = Number(plan.league_points || 350);
 
-  // Format stops
-  const formattedStops = stops
-    .filter(s => s.tour_plan_id === plan.tour_plan_id)
-    .sort((a, b) => (a.stop_order || 0) - (b.stop_order || 0))
-    .map(s => {
-      let parsedPhotos = [];
-      if (s.photos) {
-        try {
-          parsedPhotos = typeof s.photos === "string" ? JSON.parse(s.photos) : s.photos;
-          if (!Array.isArray(parsedPhotos)) parsedPhotos = [parsedPhotos];
-        } catch (e) {
-          parsedPhotos = s.photos.split(",").map(p => p.trim()).filter(Boolean);
-        }
-      }
-
-      return {
-        id: s.tour_plan_place_id,
-        order: s.stop_order || 1,
-        placeId: s.place_id || null,
-        placeName: s.place_name || s.location || "Scenic Spot",
-        location: s.location || s.place_name || "",
-        lat: Number(s.latitude || 23.8103),
-        lng: Number(s.longitude || 90.4125),
-        transportMode: s.transport_mode || "Bus",
-        transportDetails: s.transport_details || "",
-        transportCost: Number(s.transport_cost || 0),
-        hasAccommodation: Boolean(s.has_accommodation),
-        accommodationType: s.accommodation_type || "Hotel",
-        accommodationName: s.accommodation_name || "",
-        accommodationCost: Number(s.accommodation_cost || 0),
-        accommodationDetails: s.accommodation_details || "",
-        stayDuration: s.stay_duration || "1 Night",
-        notes: s.notes || "",
-        status: s.status || "pending", // 'pending' | 'checked_in' | 'skipped' | 'planned'
-        isSpontaneous: Boolean(s.is_spontaneous),
-        discoveryBadge: s.discovery_badge || "",
-        checkInTime: s.check_in_time || null,
-        checkInGps: s.check_in_lat ? { lat: Number(s.check_in_lat), lng: Number(s.check_in_lng) } : null,
-        checkInNote: s.check_in_note || "",
-        photos: parsedPhotos,
-        expense: Number(s.Expense || s.expense || 0)
-      };
-    });
+  // Format stops dynamically sequenced by check-in sequence
+  const planStops = stops.filter(s => s.tour_plan_id === plan.tour_plan_id);
+  const formattedStops = sortAndFormatStops(planStops);
 
   // Format companions
   const formattedCompanions = companions
@@ -380,6 +427,8 @@ export async function createTourPlan(req, res) {
       startDate,
       endDate,
       targetBudget,
+      spentBudget,
+      totalCost,
       travelType,
       season,
       transportation,
@@ -392,7 +441,8 @@ export async function createTourPlan(req, res) {
     } = req.body;
 
     const userId = await ensureUserExists(author);
-    const tourPlanId = "exp_" + Date.now();
+    const tourPlanId = req.body.id || req.body.tourPlanId || ("exp_" + Date.now());
+    const computedSpentBudget = Number(spentBudget ?? totalCost ?? 0);
 
     // 1. Insert into tour_plans
     await query(`
@@ -400,7 +450,21 @@ export async function createTourPlan(req, res) {
         tour_plan_id, user_id, title, description, starting_location, destination,
         travel_start_date, travel_end_date, total_budget, spent_budget,
         travel_type, season, transportation, cover_image, status, is_public
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 1)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      ON DUPLICATE KEY UPDATE
+        title = VALUES(title),
+        description = VALUES(description),
+        starting_location = VALUES(starting_location),
+        destination = VALUES(destination),
+        travel_start_date = VALUES(travel_start_date),
+        travel_end_date = VALUES(travel_end_date),
+        total_budget = VALUES(total_budget),
+        spent_budget = VALUES(spent_budget),
+        travel_type = VALUES(travel_type),
+        season = VALUES(season),
+        transportation = VALUES(transportation),
+        cover_image = VALUES(cover_image),
+        status = VALUES(status)
     `, [
       tourPlanId,
       userId,
@@ -411,6 +475,7 @@ export async function createTourPlan(req, res) {
       startDate || new Date().toISOString().split("T")[0],
       endDate || new Date(Date.now() + 4 * 86400000).toISOString().split("T")[0],
       Number(targetBudget) || 25000,
+      computedSpentBudget,
       travelType || "Friends",
       season || "Monsoon",
       transportation || "Bus",
@@ -422,8 +487,14 @@ export async function createTourPlan(req, res) {
     if (Array.isArray(stops) && stops.length > 0) {
       for (let i = 0; i < stops.length; i++) {
         const s = stops[i];
-        const stopId = s.id || `stop_${Date.now()}_${i}`;
+        const stopId = s.id || s.tour_plan_place_id || `stop_${Date.now()}_${i}`;
         const photosJson = JSON.stringify(s.photos || []);
+        const stopExpense = Number(s.expense ?? (Number(s.transportCost || s.transport_cost || 0) + Number(s.accommodationCost || s.accommodation_cost || 0)));
+        let validPlaceId = null;
+        const candidateId = s.placeId || s.place_id;
+        if (candidateId && typeof candidateId === "string" && candidateId.startsWith("place_")) {
+          validPlaceId = candidateId;
+        }
 
         await query(`
           INSERT INTO tour_plan_places_modified (
@@ -433,30 +504,51 @@ export async function createTourPlan(req, res) {
             accommodation_cost, accommodation_details, stay_duration, notes,
             status, is_spontaneous, discovery_badge, photos, Expense
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            place_name = VALUES(place_name),
+            location = VALUES(location),
+            stop_order = VALUES(stop_order),
+            latitude = VALUES(latitude),
+            longitude = VALUES(longitude),
+            transport_mode = VALUES(transport_mode),
+            transport_details = VALUES(transport_details),
+            transport_cost = VALUES(transport_cost),
+            has_accommodation = VALUES(has_accommodation),
+            accommodation_type = VALUES(accommodation_type),
+            accommodation_name = VALUES(accommodation_name),
+            accommodation_cost = VALUES(accommodation_cost),
+            accommodation_details = VALUES(accommodation_details),
+            stay_duration = VALUES(stay_duration),
+            notes = VALUES(notes),
+            status = VALUES(status),
+            is_spontaneous = VALUES(is_spontaneous),
+            discovery_badge = VALUES(discovery_badge),
+            photos = VALUES(photos),
+            Expense = VALUES(Expense)
         `, [
           stopId,
           tourPlanId,
-          s.placeId || null,
-          s.placeName || s.location || "Scenic Spot",
-          s.location || s.placeName || "",
-          s.order || (i + 1),
-          s.lat || 23.8103,
-          s.lng || 90.4125,
-          s.transportMode || "Bus",
-          s.transportDetails || "",
-          Number(s.transportCost || 0),
-          s.hasAccommodation ? 1 : 0,
-          s.accommodationType || "Hotel",
-          s.accommodationName || "",
-          Number(s.accommodationCost || 0),
-          s.accommodationDetails || "",
-          s.stayDuration || "1 Night",
+          validPlaceId,
+          s.placeName || s.place_name || s.name || s.location || `Stop ${i + 1}`,
+          s.location || s.placeName || s.place_name || "",
+          s.order || s.stop_order || (i + 1),
+          Number(s.lat ?? s.latitude ?? 23.8103),
+          Number(s.lng ?? s.longitude ?? 90.4125),
+          s.transportMode || s.transport_mode || "Bus",
+          s.transportDetails || s.transport_details || "",
+          Number(s.transportCost || s.transport_cost || 0),
+          (s.hasAccommodation || s.has_accommodation) ? 1 : 0,
+          s.accommodationType || s.accommodation_type || "Hotel",
+          s.accommodationName || s.accommodation_name || "",
+          Number(s.accommodationCost || s.accommodation_cost || 0),
+          s.accommodationDetails || s.accommodation_details || "",
+          s.stayDuration || s.stay_duration || "1 Night",
           s.notes || "",
           s.status || "pending",
           s.isSpontaneous ? 1 : 0,
-          s.discoveryBadge || "",
+          s.discoveryBadge || s.discovery_badge || "",
           photosJson,
-          Number(s.expense || 0)
+          stopExpense
         ]);
       }
     }
@@ -592,8 +684,14 @@ export async function updateTourPlan(req, res) {
       await query("DELETE FROM tour_plan_places_modified WHERE tour_plan_id = ?", [id]);
       for (let i = 0; i < stops.length; i++) {
         const s = stops[i];
-        const stopId = s.id || `stop_${Date.now()}_${i}`;
+        const stopId = s.id || s.tour_plan_place_id || `stop_${Date.now()}_${i}`;
         const photosJson = JSON.stringify(s.photos || []);
+        const stopExpense = Number(s.expense ?? (Number(s.transportCost || s.transport_cost || 0) + Number(s.accommodationCost || s.accommodation_cost || 0)));
+        let validPlaceId = null;
+        const candidateId = s.placeId || s.place_id;
+        if (candidateId && typeof candidateId === "string" && candidateId.startsWith("place_")) {
+          validPlaceId = candidateId;
+        }
 
         await query(`
           INSERT INTO tour_plan_places_modified (
@@ -607,31 +705,31 @@ export async function updateTourPlan(req, res) {
         `, [
           stopId,
           id,
-          s.placeId || null,
-          s.placeName || s.location || "Scenic Spot",
-          s.location || s.placeName || "",
-          s.order || (i + 1),
-          s.lat || 23.8103,
-          s.lng || 90.4125,
-          s.transportMode || "Bus",
-          s.transportDetails || "",
-          Number(s.transportCost || 0),
-          s.hasAccommodation ? 1 : 0,
-          s.accommodationType || "Hotel",
-          s.accommodationName || "",
-          Number(s.accommodationCost || 0),
-          s.accommodationDetails || "",
-          s.stayDuration || "1 Night",
+          validPlaceId,
+          s.placeName || s.place_name || s.name || s.location || `Stop ${i + 1}`,
+          s.location || s.placeName || s.place_name || "",
+          s.order || s.stop_order || (i + 1),
+          Number(s.lat ?? s.latitude ?? 23.8103),
+          Number(s.lng ?? s.longitude ?? 90.4125),
+          s.transportMode || s.transport_mode || "Bus",
+          s.transportDetails || s.transport_details || "",
+          Number(s.transportCost || s.transport_cost || 0),
+          (s.hasAccommodation || s.has_accommodation) ? 1 : 0,
+          s.accommodationType || s.accommodation_type || "Hotel",
+          s.accommodationName || s.accommodation_name || "",
+          Number(s.accommodationCost || s.accommodation_cost || 0),
+          s.accommodationDetails || s.accommodation_details || "",
+          s.stayDuration || s.stay_duration || "1 Night",
           s.notes || "",
           s.status || "pending",
           s.isSpontaneous ? 1 : 0,
-          s.discoveryBadge || "",
+          s.discoveryBadge || s.discovery_badge || "",
           s.checkInTime || null,
-          s.checkInGps?.lat || null,
-          s.checkInGps?.lng || null,
-          s.checkInNote || "",
+          s.checkInGps?.lat || s.check_in_lat || null,
+          s.checkInGps?.lng || s.check_in_lng || null,
+          s.checkInNote || s.check_in_note || "",
           photosJson,
-          Number(s.expense || 0)
+          stopExpense
         ]);
       }
     }
@@ -720,11 +818,24 @@ export async function startTourPlan(req, res) {
       await query("UPDATE users SET league_points = league_points + 50 WHERE user_id = ?", [userId]);
     }
 
+    const [updatedPlan] = await query(
+      `SELECT p.*, u.username, u.first_name, u.last_name, u.profile_picture_url, u.league_points
+       FROM tour_plans p
+       LEFT JOIN users u ON p.user_id = u.user_id
+       WHERE p.tour_plan_id = ?`,
+      [id]
+    );
+    const updatedStops = await query("SELECT * FROM tour_plan_places_modified WHERE tour_plan_id = ? ORDER BY stop_order ASC", [id]);
+    const updatedMembers = await query("SELECT * FROM tour_plan_members WHERE tour_plan_id = ?", [id]);
+    const updatedExpenses = await query("SELECT * FROM tour_plan_expenses WHERE tour_plan_id = ?", [id]);
+
+    const formatted = formatTourPlan(updatedPlan, updatedStops, updatedMembers, updatedExpenses);
+
     try {
-      getIO().emit("tour:started", { id, status: "ongoing", startedAt: new Date().toISOString() });
+      getIO().emit("tour:started", { id, status: "ongoing", startedAt: new Date().toISOString(), expedition: formatted });
     } catch (e) {}
 
-    res.json({ success: true, message: "Tour is now ongoing!" });
+    res.json({ success: true, message: "Tour is now ongoing!", expedition: formatted });
   } catch (error) {
     console.error("Error in startTourPlan:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -746,11 +857,24 @@ export async function endTourPlan(req, res) {
       await query("UPDATE users SET league_points = league_points + 100 WHERE user_id = ?", [userId]);
     }
 
+    const [updatedPlan] = await query(
+      `SELECT p.*, u.username, u.first_name, u.last_name, u.profile_picture_url, u.league_points
+       FROM tour_plans p
+       LEFT JOIN users u ON p.user_id = u.user_id
+       WHERE p.tour_plan_id = ?`,
+      [id]
+    );
+    const updatedStops = await query("SELECT * FROM tour_plan_places_modified WHERE tour_plan_id = ? ORDER BY stop_order ASC", [id]);
+    const updatedMembers = await query("SELECT * FROM tour_plan_members WHERE tour_plan_id = ?", [id]);
+    const updatedExpenses = await query("SELECT * FROM tour_plan_expenses WHERE tour_plan_id = ?", [id]);
+
+    const formatted = formatTourPlan(updatedPlan, updatedStops, updatedMembers, updatedExpenses);
+
     try {
-      getIO().emit("tour:completed", { id, status: "completed", endedAt: new Date().toISOString() });
+      getIO().emit("tour:completed", { id, status: "completed", endedAt: new Date().toISOString(), expedition: formatted });
     } catch (e) {}
 
-    res.json({ success: true, message: "Tour has been marked completed! Congratulations on the expedition." });
+    res.json({ success: true, message: "Tour has been marked completed! Congratulations on the expedition.", expedition: formatted });
   } catch (error) {
     console.error("Error in endTourPlan:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -783,11 +907,24 @@ export async function restartTourPlan(req, res) {
       await query("UPDATE users SET league_points = league_points + 25 WHERE user_id = ?", [userId]);
     }
 
+    const [updatedPlan] = await query(
+      `SELECT p.*, u.username, u.first_name, u.last_name, u.profile_picture_url, u.league_points
+       FROM tour_plans p
+       LEFT JOIN users u ON p.user_id = u.user_id
+       WHERE p.tour_plan_id = ?`,
+      [id]
+    );
+    const updatedStops = await query("SELECT * FROM tour_plan_places_modified WHERE tour_plan_id = ? ORDER BY stop_order ASC", [id]);
+    const updatedMembers = await query("SELECT * FROM tour_plan_members WHERE tour_plan_id = ?", [id]);
+    const updatedExpenses = await query("SELECT * FROM tour_plan_expenses WHERE tour_plan_id = ?", [id]);
+
+    const formatted = formatTourPlan(updatedPlan, updatedStops, updatedMembers, updatedExpenses);
+
     try {
-      getIO().emit("tour:restarted", { id, status: "ongoing", restartedAt: new Date().toISOString() });
+      getIO().emit("tour:restarted", { id, status: "ongoing", restartedAt: new Date().toISOString(), expedition: formatted });
     } catch (e) {}
 
-    res.json({ success: true, message: "Tour has been restarted successfully and is now active in Live Cockpit!" });
+    res.json({ success: true, message: "Tour has been restarted successfully and is now active in Live Cockpit!", expedition: formatted });
   } catch (error) {
     console.error("Error in restartTourPlan:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -855,20 +992,36 @@ export async function checkInStop(req, res) {
       await query("UPDATE users SET league_points = league_points + 35 WHERE user_id = ?", [userId]);
     }
 
+    // Automatically resequence all tour stops so the sequence is based on actual check-in time!
+    await resequenceTourStops(id);
+
+    // Fetch refreshed and resequenced stops
+    const allStopsRaw = await query(
+      "SELECT * FROM tour_plan_places_modified WHERE tour_plan_id = ? ORDER BY stop_order ASC",
+      [id]
+    );
+    const formattedStops = sortAndFormatStops(allStopsRaw);
+
     const payload = {
       tourId: id,
       stopId,
       gps: gps || null,
       checkInTime,
       note: note || "",
-      photos: photos || []
+      photos: photos || [],
+      stops: formattedStops
     };
 
     try {
       getIO().emit("tour:stop_checked_in", payload);
     } catch (e) {}
 
-    res.json({ success: true, message: "Checked in successfully!", checkInData: payload });
+    res.json({ 
+      success: true, 
+      message: "Checked in successfully! Sequence updated based on your check-in time.", 
+      checkInData: payload,
+      stops: formattedStops
+    });
   } catch (error) {
     console.error("Error in checkInStop:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -912,6 +1065,8 @@ export async function addSpontaneousStop(req, res) {
     const {
       id: customId,
       stopId: customStopId,
+      insertAfterStopId,
+      insertAfterOrder,
       placeName,
       location,
       lat,
@@ -955,11 +1110,49 @@ export async function addSpontaneousStop(req, res) {
       });
     }
 
-    const [countResult] = await query(
-      "SELECT COUNT(*) as count FROM tour_plan_places_modified WHERE tour_plan_id = ?",
-      [id]
+    // Determine target sequence position (insert between two places)
+    let targetOrder = null;
+
+    if (insertAfterOrder !== undefined && insertAfterOrder !== null && !isNaN(Number(insertAfterOrder))) {
+      targetOrder = Number(insertAfterOrder) + 1;
+    } else if (insertAfterStopId) {
+      const [refStop] = await query(
+        "SELECT stop_order FROM tour_plan_places_modified WHERE tour_plan_id = ? AND tour_plan_place_id = ? LIMIT 1",
+        [id, insertAfterStopId]
+      );
+      if (refStop && refStop.stop_order != null) {
+        targetOrder = Number(refStop.stop_order) + 1;
+      }
+    }
+
+    if (targetOrder === null) {
+      // Find the last completed / checked-in stop
+      const [lastChecked] = await query(
+        "SELECT MAX(stop_order) as maxOrder FROM tour_plan_places_modified WHERE tour_plan_id = ? AND status = 'checked_in'",
+        [id]
+      );
+      if (lastChecked && lastChecked.maxOrder != null) {
+        targetOrder = Number(lastChecked.maxOrder) + 1;
+      } else {
+        // If no stops are checked in, insert after departure (order 2) if stops exist, else order 1
+        const [firstStop] = await query(
+          "SELECT MIN(stop_order) as minOrder, COUNT(*) as cnt FROM tour_plan_places_modified WHERE tour_plan_id = ?",
+          [id]
+        );
+        if (firstStop && firstStop.cnt > 0) {
+          targetOrder = Number(firstStop.minOrder) + 1;
+        } else {
+          targetOrder = 1;
+        }
+      }
+    }
+
+    // Shift all subsequent stops down by +1 to make room for this spontaneous detour
+    await query(
+      "UPDATE tour_plan_places_modified SET stop_order = stop_order + 1 WHERE tour_plan_id = ? AND stop_order >= ?",
+      [id, targetOrder]
     );
-    const nextOrder = (countResult[0]?.count || 0) + 1;
+
     const photosJson = JSON.stringify(photos.length > 0 ? photos : ["https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=500"]);
 
     await query(`
@@ -976,7 +1169,7 @@ export async function addSpontaneousStop(req, res) {
       id,
       placeName || "Uncharted Scenic Spot",
       location || "On Route Discovery",
-      nextOrder,
+      targetOrder,
       lat || 24.3000,
       lng || 91.8000,
       transportMode || "Local Transport",
@@ -1024,9 +1217,20 @@ export async function addSpontaneousStop(req, res) {
       await query("UPDATE users SET league_points = league_points + 50 WHERE user_id = ?", [userId]);
     }
 
-    const createdStop = {
+    // Resequence all tour stops based on actual check-in sequence
+    await resequenceTourStops(id);
+
+    // Fetch refreshed, properly ordered stops
+    const allStopsRaw = await query(
+      "SELECT * FROM tour_plan_places_modified WHERE tour_plan_id = ? ORDER BY stop_order ASC",
+      [id]
+    );
+
+    const allStopsFormatted = sortAndFormatStops(allStopsRaw);
+
+    const createdStop = allStopsFormatted.find(s => s.id === stopId) || {
       id: stopId,
-      order: nextOrder,
+      order: targetOrder,
       placeName: placeName || "Uncharted Scenic Spot",
       location: location || "On Route Discovery",
       lat: Number(lat || 24.3000),
@@ -1049,13 +1253,14 @@ export async function addSpontaneousStop(req, res) {
     };
 
     try {
-      getIO().emit("tour:spontaneous_stop_added", { tourId: id, stop: createdStop });
+      getIO().emit("tour:spontaneous_stop_added", { tourId: id, stop: createdStop, stops: allStopsFormatted });
     } catch (e) {}
 
     res.status(201).json({
       success: true,
-      message: "Spontaneous discovery recorded and pinned to route map!",
-      stop: createdStop
+      message: "Spontaneous discovery recorded and pinned to route map in sequence!",
+      stop: createdStop,
+      stops: allStopsFormatted
     });
   } catch (error) {
     console.error("Error in addSpontaneousStop:", error);

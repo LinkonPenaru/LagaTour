@@ -4,6 +4,7 @@ import {
   getUserPosts,
   getSavedPosts,
   createPost,
+  verifyPostMedia,
   updatePost,
   deletePost,
   toggleLike,
@@ -22,6 +23,7 @@ const router = express.Router();
 router.get("/posts", getAllPosts);
 router.get("/posts/user/:userId", getUserPosts);
 router.get("/posts/saved/:userId", getSavedPosts);
+router.post("/posts/verify-media", verifyPostMedia);
 router.post("/posts", createPost);
 router.put("/posts/:id", updatePost);
 router.delete("/posts/:id", deletePost);

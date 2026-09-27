@@ -13,6 +13,26 @@ export function useExpeditions() {
   return context || {};
 }
 
+/**
+ * Sort stops dynamically by check-in sequence:
+ * Checked-in stops appear first ordered chronologically by checkInTime ASC,
+ * followed by pending/planned stops ordered by their scheduled order ASC.
+ */
+export function sortStopsByCheckIn(stops = []) {
+  const checked = [];
+  const pending = [];
+  for (const s of stops) {
+    if (s.status === 'checked_in' && s.checkInTime) {
+      checked.push(s);
+    } else {
+      pending.push(s);
+    }
+  }
+  checked.sort((a, b) => new Date(a.checkInTime).getTime() - new Date(b.checkInTime).getTime());
+  pending.sort((a, b) => (a.order || 0) - (b.order || 0));
+  return [...checked, ...pending].map((s, idx) => ({ ...s, order: idx + 1 }));
+}
+
 export function ExpeditionProvider({ children }) {
   const { currentUser, addPoints } = useAuth();
   const { posts, createPost, updatePost } = usePosts();
@@ -78,7 +98,18 @@ export function ExpeditionProvider({ children }) {
     };
 
     const handleTourUpdated = (updatedExp) => {
-      setExpeditions(prev => prev.map(e => e.id === updatedExp.id ? updatedExp : e));
+      setExpeditions(prev => prev.map(e => {
+        if (e.id === updatedExp.id) {
+          return {
+            ...e,
+            ...updatedExp,
+            stops: (Array.isArray(updatedExp.stops) && updatedExp.stops.length > 0)
+              ? updatedExp.stops
+              : (e.stops || [])
+          };
+        }
+        return e;
+      }));
       setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     };
 
@@ -87,8 +118,24 @@ export function ExpeditionProvider({ children }) {
       if (activeExpeditionId === id) setActiveExpeditionId(null);
     };
 
-    const handleTourStarted = ({ id, status }) => {
-      setExpeditions(prev => prev.map(e => e.id === id ? { ...e, status } : e));
+    const handleTourStarted = ({ id, status, expedition: backendExp }) => {
+      setActiveExpeditionId(id);
+      setExpeditions(prev => prev.map(e => {
+        if (e.id === id) {
+          if (backendExp) {
+            return {
+              ...e,
+              ...backendExp,
+              status: status || "ongoing",
+              stops: (Array.isArray(backendExp.stops) && backendExp.stops.length > 0)
+                ? backendExp.stops
+                : (e.stops || [])
+            };
+          }
+          return { ...e, status: status || "ongoing" };
+        }
+        return e;
+      }));
     };
 
     const handleTourCompleted = ({ id, status }) => {
@@ -97,10 +144,17 @@ export function ExpeditionProvider({ children }) {
     };
 
     const handleStopCheckedIn = (data) => {
-      const { tourId, stopId, gps, note, photos, checkInTime } = data || {};
+      const { tourId, stopId, gps, note, photos, checkInTime, stops } = data || {};
       setExpeditions(prev => prev.map(exp => {
         if (exp.id === tourId) {
-          const updatedStops = (exp.stops || []).map(s => {
+          if (stops && Array.isArray(stops) && stops.length > 0) {
+            return {
+              ...exp,
+              stops: stops,
+              currentGps: gps ? { ...gps, lastUpdated: "Live Check-in" } : exp.currentGps
+            };
+          }
+          const rawStops = (exp.stops || []).map(s => {
             if (s.id === stopId) {
               return {
                 ...s,
@@ -115,7 +169,7 @@ export function ExpeditionProvider({ children }) {
           });
           return {
             ...exp,
-            stops: updatedStops,
+            stops: sortStopsByCheckIn(rawStops),
             currentGps: gps ? { ...gps, lastUpdated: "Live Check-in" } : exp.currentGps
           };
         }
@@ -124,20 +178,34 @@ export function ExpeditionProvider({ children }) {
       setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     };
 
-    const handleSpontaneousAdded = ({ tourId, stop }) => {
+    const handleSpontaneousAdded = ({ tourId, stop, stops }) => {
       setExpeditions(prev => prev.map(exp => {
         if (exp.id === tourId) {
-          const exists = (exp.stops || []).some(s => s.id === stop.id || (s.isSpontaneous && s.placeName === stop.placeName && s.order === stop.order));
-          if (exists) {
+          if (stops && Array.isArray(stops) && stops.length > 0) {
             return {
               ...exp,
-              stops: (exp.stops || []).map(s => (s.id === stop.id || (s.isSpontaneous && s.placeName === stop.placeName && s.order === stop.order)) ? { ...s, ...stop } : s),
+              stops: stops,
               currentGps: { lat: stop.lat, lng: stop.lng, lastUpdated: "Spontaneous Discovery" }
             };
           }
+          const curStops = exp.stops || [];
+          const exists = curStops.some(s => s.id === stop.id);
+          let updatedStops;
+          if (exists) {
+            updatedStops = curStops.map(s => s.id === stop.id ? { ...s, ...stop } : s);
+          } else {
+            const insertIdx = curStops.findIndex(s => s.order >= stop.order);
+            const cloned = [...curStops];
+            if (insertIdx !== -1) {
+              cloned.splice(insertIdx, 0, stop);
+            } else {
+              cloned.push(stop);
+            }
+            updatedStops = cloned.map((s, idx) => ({ ...s, order: idx + 1 }));
+          }
           return {
             ...exp,
-            stops: [...(exp.stops || []), stop],
+            stops: updatedStops,
             currentGps: { lat: stop.lat, lng: stop.lng, lastUpdated: "Spontaneous Discovery" }
           };
         }
@@ -329,7 +397,12 @@ export function ExpeditionProvider({ children }) {
     try {
       const res = await api.createTourPlan(newExpedition);
       if (res && res.expedition) {
-        setExpeditions(prev => prev.map(e => e.id === newId ? res.expedition : e));
+        setExpeditions(prev => prev.map(e => e.id === newId ? {
+          ...res.expedition,
+          stops: (Array.isArray(res.expedition.stops) && res.expedition.stops.length > 0)
+            ? res.expedition.stops
+            : e.stops
+        } : e));
       }
     } catch (e) {
       console.warn("Tour plan saved locally, backend sync will retry:", e.message);
@@ -353,6 +426,7 @@ export function ExpeditionProvider({ children }) {
         updatedObj = {
           ...exp,
           ...updatedFields,
+          stops: updatedFields.stops !== undefined ? updatedFields.stops : exp.stops,
           spentBudget: updatedFields.spentBudget !== undefined ? updatedFields.spentBudget : calculatedSpent
         };
         return updatedObj;
@@ -366,7 +440,11 @@ export function ExpeditionProvider({ children }) {
 
     // Sync to Backend
     try {
-      await api.updateTourPlan(tourId, updatedFields);
+      const payloadToSend = {
+        ...updatedFields,
+        stops: updatedFields.stops !== undefined ? updatedFields.stops : updatedObj?.stops
+      };
+      await api.updateTourPlan(tourId, payloadToSend);
     } catch (e) {
       console.warn("Tour plan update cached locally:", e.message);
     }
@@ -395,9 +473,19 @@ export function ExpeditionProvider({ children }) {
    */
   const startExpedition = async (tourId) => {
     setActiveExpeditionId(tourId);
-    const updated = await updateExpedition(tourId, {
-      status: "ongoing"
-    });
+
+    let updatedObj = null;
+    setExpeditions(prev => prev.map(exp => {
+      if (exp.id === tourId) {
+        updatedObj = {
+          ...exp,
+          status: "ongoing",
+          actualStartedAt: new Date().toISOString()
+        };
+        return updatedObj;
+      }
+      return exp;
+    }));
 
     if (addPoints) {
       addPoints(50);
@@ -405,10 +493,21 @@ export function ExpeditionProvider({ children }) {
     }
 
     try {
-      await api.startTourPlan(tourId, currentUser?.id || currentUser?.user_id);
-    } catch (e) {}
+      const res = await api.startTourPlan(tourId, currentUser?.id || currentUser?.user_id);
+      if (res && res.expedition) {
+        setExpeditions(prev => prev.map(e => e.id === tourId ? {
+          ...res.expedition,
+          status: "ongoing",
+          stops: (Array.isArray(res.expedition.stops) && res.expedition.stops.length > 0)
+            ? res.expedition.stops
+            : e.stops
+        } : e));
+      }
+    } catch (e) {
+      console.warn("Tour plan start sync failed:", e.message);
+    }
 
-    return updated;
+    return updatedObj;
   };
 
   /**
@@ -498,8 +597,10 @@ export function ExpeditionProvider({ children }) {
       lastUpdated: "Just now"
     };
 
+    const sequencedStops = sortStopsByCheckIn(updatedStops);
+
     const updated = await updateExpedition(tourId, {
-      stops: updatedStops,
+      stops: sequencedStops,
       expenses: updatedExpenses,
       currentGps: currentGps
     });
@@ -509,9 +610,9 @@ export function ExpeditionProvider({ children }) {
       confetti({ particleCount: 60, spread: 50, origin: { y: 0.7 } });
     }
 
-    // Backend sync
+    // Backend sync with authoritative check-in resequencing
     try {
-      await api.checkInTourStop(tourId, {
+      const res = await api.checkInTourStop(tourId, {
         stopId,
         gps: checkInData.gps,
         note: checkInData.note,
@@ -519,6 +620,9 @@ export function ExpeditionProvider({ children }) {
         expense: checkInData.expense,
         userId: currentUser?.id || currentUser?.user_id
       });
+      if (res && res.stops && Array.isArray(res.stops) && res.stops.length > 0) {
+        setExpeditions(prev => prev.map(exp => exp.id === tourId ? { ...exp, stops: res.stops } : exp));
+      }
     } catch (e) {
       console.warn("Check-in recorded offline, will sync when reconnected.");
     }
@@ -561,9 +665,45 @@ export function ExpeditionProvider({ children }) {
     if (!targetExp) return;
 
     const newStopId = discoveryData.id || discoveryData.stopId || ("stop_spont_" + Date.now());
+    const existingStops = targetExp.stops || [];
+
+    // Determine target insertion index based on user selection or last completed stop
+    let insertIndex = -1;
+    let targetOrder = null;
+
+    if (discoveryData.insertAfterOrder !== undefined && discoveryData.insertAfterOrder !== null && !isNaN(Number(discoveryData.insertAfterOrder))) {
+      targetOrder = Number(discoveryData.insertAfterOrder) + 1;
+      insertIndex = existingStops.findIndex(s => (s.order || 0) >= targetOrder);
+      if (insertIndex === -1) insertIndex = existingStops.length;
+    } else if (discoveryData.insertAfterStopId) {
+      const refIdx = existingStops.findIndex(s => s.id === discoveryData.insertAfterStopId);
+      if (refIdx !== -1) {
+        insertIndex = refIdx + 1;
+        targetOrder = (existingStops[refIdx].order || refIdx + 1) + 1;
+      }
+    }
+
+    if (insertIndex === -1) {
+      // Find the last completed / checked-in stop
+      let lastCheckedIdx = -1;
+      for (let i = existingStops.length - 1; i >= 0; i--) {
+        if (existingStops[i].status === 'checked_in') {
+          lastCheckedIdx = i;
+          break;
+        }
+      }
+      if (lastCheckedIdx !== -1) {
+        insertIndex = lastCheckedIdx + 1;
+        targetOrder = (existingStops[lastCheckedIdx].order || lastCheckedIdx + 1) + 1;
+      } else {
+        insertIndex = existingStops.length > 0 ? 1 : 0;
+        targetOrder = (existingStops[0]?.order || 1) + 1;
+      }
+    }
+
     const newSpontaneousStop = {
       id: newStopId,
-      order: (targetExp.stops || []).length + 1,
+      order: targetOrder || (insertIndex + 1),
       placeName: discoveryData.placeName || "Uncharted Scenic Spot",
       location: discoveryData.location || "On Route Discovery",
       lat: discoveryData.lat || (targetExp.currentGps?.lat ? targetExp.currentGps.lat + 0.02 : 24.3000),
@@ -602,12 +742,21 @@ export function ExpeditionProvider({ children }) {
 
     const calculatedSpent = updatedExpenses.reduce((acc, x) => acc + (Number(x.amount) || 0), 0);
 
-    // Optimistically update React state exactly once
+    // Optimistically update React state with proper position and resequenced orders
     let updatedExpedition = null;
     setExpeditions(prev => prev.map(exp => {
       if (exp.id === tourId) {
-        const stopExists = (exp.stops || []).some(s => s.id === newStopId || (s.isSpontaneous && s.placeName === newSpontaneousStop.placeName && s.order === newSpontaneousStop.order));
-        const finalStops = stopExists ? exp.stops : [...(exp.stops || []), newSpontaneousStop];
+        const curStops = exp.stops || [];
+        const alreadyHas = curStops.some(s => s.id === newStopId);
+        let finalStops;
+        if (alreadyHas) {
+          finalStops = curStops;
+        } else {
+          const cloned = [...curStops];
+          const pos = Math.min(Math.max(0, insertIndex), cloned.length);
+          cloned.splice(pos, 0, newSpontaneousStop);
+          finalStops = cloned.map((s, idx) => ({ ...s, order: idx + 1 }));
+        }
 
         updatedExpedition = {
           ...exp,
@@ -636,9 +785,21 @@ export function ExpeditionProvider({ children }) {
         ...discoveryData,
         id: newStopId,
         stopId: newStopId,
+        insertAfterStopId: discoveryData.insertAfterStopId,
+        insertAfterOrder: discoveryData.insertAfterOrder,
         userId: currentUser?.id || currentUser?.user_id
       });
-      if (res && res.stop) {
+      if (res && res.stops && Array.isArray(res.stops) && res.stops.length > 0) {
+        setExpeditions(prev => prev.map(exp => {
+          if (exp.id === tourId) {
+            return {
+              ...exp,
+              stops: res.stops
+            };
+          }
+          return exp;
+        }));
+      } else if (res && res.stop) {
         setExpeditions(prev => prev.map(exp => {
           if (exp.id === tourId) {
             return {

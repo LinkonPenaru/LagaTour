@@ -94,17 +94,33 @@ export default function ExpeditionMap({
       gpsMarkerRef.current = null;
     }
 
-    const validStops = stops.filter(s => typeof s.lat === "number" && typeof s.lng === "number");
+    const validStops = stops
+      .map((s, idx) => ({
+        ...s,
+        id: s.id || `map_stop_${idx}`,
+        lat: Number(s.lat ?? s.latitude),
+        lng: Number(s.lng ?? s.longitude),
+        placeName: s.placeName || s.place_name || s.name || s.location || `Stop ${idx + 1}`
+      }))
+      .filter(s => !isNaN(s.lat) && !isNaN(s.lng) && s.lat !== 0 && s.lng !== 0);
     const latLngs = [];
 
     validStops.forEach((stop, idx) => {
       latLngs.push([stop.lat, stop.lng]);
 
       let pinColor = "#3b82f6"; // Blue for pending
-      let pinEmoji = `${idx + 1}`;
+      let pinEmoji = `${idx}`;
       let isPulse = false;
 
-      if (stop.isSpontaneous) {
+      if (stop.isDeparture || (idx === 0 && stop.placeId === "origin_start")) {
+        pinColor = "#10b981"; // Emerald Green for Departure
+        pinEmoji = "🚩";
+        isPulse = true;
+      } else if (stop.isReturn || (idx === validStops.length - 1 && stop.placeId === "origin_return")) {
+        pinColor = "#8b5cf6"; // Purple for Return / Finish
+        pinEmoji = "🏁";
+        isPulse = true;
+      } else if (stop.isSpontaneous) {
         pinColor = "#f59e0b"; // Gold / Amber
         pinEmoji = "🌟";
         isPulse = true;
@@ -117,7 +133,7 @@ export default function ExpeditionMap({
       } else if (idx === validStops.findIndex(s => s.status === "pending")) {
         // Next active target stop
         pinColor = "#6366f1"; // Indigo
-        pinEmoji = "➔";
+        pinEmoji = `${idx}`;
         isPulse = true;
       }
 
@@ -125,7 +141,11 @@ export default function ExpeditionMap({
       const marker = L.marker([stop.lat, stop.lng], { icon }).addTo(map);
 
       // Popup content
-      const statusBadge = stop.isSpontaneous
+      const statusBadge = stop.isDeparture || stop.placeId === "origin_start"
+        ? '<span style="background:#d1fae5; color:#065f46; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:10px;">🚩 Tour Departure Point</span>'
+        : stop.isReturn || stop.placeId === "origin_return"
+        ? '<span style="background:#ede9fe; color:#5b21b6; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:10px;">🏁 Return Destination & Circuit Complete</span>'
+        : stop.isSpontaneous
         ? '<span style="background:#fef3c7; color:#b45309; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:10px;">🌟 Spontaneous Discovery</span>'
         : stop.status === "checked_in"
         ? '<span style="background:#d1fae5; color:#065f46; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:10px;">✓ Checked In</span>'
@@ -141,15 +161,22 @@ export default function ExpeditionMap({
           
           <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; font-size: 11px; margin-bottom: 6px;">
             <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-              <span style="color:#64748b;">Transport:</span>
+              <span style="color:#64748b;">Transit:</span>
               <span style="font-weight:600; color:#0f172a;">${stop.transportMode || 'Standard'}</span>
             </div>
+            ${Number(stop.transportCost) > 0 ? `
+            <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+              <span style="color:#64748b;">Transit Fare:</span>
+              <span style="font-weight:700; color:#059669;">৳${Number(stop.transportCost).toLocaleString()} BDT</span>
+            </div>` : ''}
+            ${stop.hasAccommodation ? `
             <div style="display:flex; justify-content:space-between;">
               <span style="color:#64748b;">Stay:</span>
               <span style="font-weight:600; color:#0f172a;">${stop.accommodationType || 'Hotel'}</span>
-            </div>
+            </div>` : ''}
           </div>
 
+          ${stop.transportDetails ? `<p style="margin:0 0 6px; font-size:10px; color:#64748b; font-style:italic;">🚌 ${stop.transportDetails}</p>` : ''}
           ${stop.checkInNote ? `<p style="margin:0 0 6px; font-size:11px; font-style:italic; color:#334155;">"${stop.checkInNote}"</p>` : ''}
           ${stop.notes && !stop.checkInNote ? `<p style="margin:0 0 6px; font-size:11px; color:#475569;">${stop.notes}</p>` : ''}
           

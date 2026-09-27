@@ -1,5 +1,6 @@
 import { query, getPool } from "../config/db.js";
 import { calculateLeague } from "../utils/leagueHelper.js";
+import { verifyMediaBatch } from "../services/imageVerificationService.js";
 
 // Helper to ensure a user exists in the database
 async function ensureUserExists(userData) {
@@ -173,6 +174,31 @@ export async function getAllPosts(req, res) {
 }
 
 /**
+ * POST /api/posts/verify-media
+ * Validate uploaded media items against tourism criteria & community safety standards
+ */
+export async function verifyPostMedia(req, res) {
+  try {
+    const { media = [], destination = "" } = req.body;
+    if (!Array.isArray(media) || media.length === 0) {
+      return res.status(400).json({ success: false, message: "Media array is required for verification." });
+    }
+
+    const verificationResults = await verifyMediaBatch(media, destination);
+    const hasFailures = verificationResults.some(r => !r.isApproved);
+
+    res.json({
+      success: true,
+      isAllApproved: !hasFailures,
+      results: verificationResults
+    });
+  } catch (error) {
+    console.error("Error in verifyPostMedia:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
  * POST /api/posts
  * Create a new travel post with photos and videos
  */
@@ -182,6 +208,20 @@ export async function createPost(req, res) {
 
     if (!caption && images.length === 0 && videos.length === 0) {
       return res.status(400).json({ success: false, message: "Caption or media is required to create a post." });
+    }
+
+    // Server-Side Strict Verification Check on Photos
+    if (images.length > 0) {
+      const mediaList = images.map(img => (typeof img === "object" ? img : { url: img }));
+      const mediaVerification = await verifyMediaBatch(mediaList, destination);
+      const rejected = mediaVerification.filter(v => !v.isApproved);
+      if (rejected.length > 0) {
+        return res.status(422).json({
+          success: false,
+          message: `Upload rejected: ${rejected[0].reason}`,
+          rejectedDetails: rejected
+        });
+      }
     }
 
     const userId = await ensureUserExists(author);
