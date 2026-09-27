@@ -1393,7 +1393,19 @@ export const api = {
     return await handleResponse(res);
   },
 
-  // ===================== AI PLAN BUILDER =====================
+  // ===================== AI TOUR PACKAGE BUILDER =====================
+
+  /**
+   * Generate dual tour packages (LagaTour Database Grounded vs Web Explorer)
+   */
+  async buildAITourPackage(specs) {
+    const res = await fetch(`${API_BASE_URL}/ai/build-package`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(specs)
+    });
+    return await handleResponse(res);
+  },
 
   /**
    * Generate AI Tour Plans (Mode 1: Destination Max Spots, Mode 2: Nearby Sequenced Expedition)
@@ -1409,4 +1421,5 @@ export const api = {
 };
 
 export default api;
+
 

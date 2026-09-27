@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "server": "node server/src/index.js",
+    "test": "python -m pytest tests -v -s",
+    "test:ai": "python -m pytest tests/test_ai_package_generation_and_expedition_sync.py -v -s",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview"

@@ -1,21 +1,14 @@
 import express from "express";
+import { buildTourPackage } from "../controllers/aiController.js";
 import { generateTourPlans } from "../services/aiService.js";
 
 const router = express.Router();
 
+// Generate dual AI tour packages (Database-grounded vs. Web-grounded with Gemini)
+router.post("/build-package", buildTourPackage);
+
 /**
  * POST /api/ai/generate-plans
- * Body:
- * {
- *   mode: "destination" | "nearby",
- *   destination: string,
- *   startingLocation: string,
- *   userGps: { lat: number, lng: number } | null,
- *   duration: number,
- *   budget: number,
- *   members: number,
- *   style: "Adventure" | "Budget" | "Luxury" | "Nature"
- * }
  */
 router.post("/generate-plans", async (req, res) => {
   try {

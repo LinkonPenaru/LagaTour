@@ -16,7 +16,10 @@ import {
   Trophy,
   Sparkles,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Filter,
+  RotateCcw,
+  DollarSign
 } from "lucide-react";
 
 export default function TourPlans() {
@@ -54,12 +57,52 @@ export default function TourPlans() {
 
   const [detailModalExpedition, setDetailModalExpedition] = useState(null);
 
-  // Filter States
+  // Filter Input States (Draft values changed by user)
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState("All");
   const [selectedSeason, setSelectedSeason] = useState("All");
-  const [selectedTransport, setSelectedTransport] = useState("All");
-  const [maxBudget, setMaxBudget] = useState(60000);
+  const [maxBudget, setMaxBudget] = useState(""); // empty string = no budget limit
+
+  // Applied Filters State (only updated when user clicks Apply Filters)
+  const [appliedFilters, setAppliedFilters] = useState({
+    search: "",
+    type: "All",
+    season: "All",
+    maxBudget: null
+  });
+
+  const handleApplyFilters = () => {
+    const budgetNum = maxBudget !== "" && !isNaN(Number(maxBudget)) && Number(maxBudget) > 0 
+      ? Number(maxBudget) 
+      : null;
+
+    setAppliedFilters({
+      search: searchQuery.trim(),
+      type: selectedType,
+      season: selectedSeason,
+      maxBudget: budgetNum
+    });
+  };
+
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setSelectedType("All");
+    setSelectedSeason("All");
+    setMaxBudget("");
+    setAppliedFilters({
+      search: "",
+      type: "All",
+      season: "All",
+      maxBudget: null
+    });
+  };
+
+  const hasActiveFilters = Boolean(
+    appliedFilters.search ||
+    appliedFilters.type !== "All" ||
+    appliedFilters.season !== "All" ||
+    appliedFilters.maxBudget !== null
+  );
 
   // Community Tour ratings & comments
   const [hiddenPlans, setHiddenPlans] = useState(() => {
@@ -113,18 +156,19 @@ export default function TourPlans() {
     setIsSummaryModalOpen(true);
   };
 
-  // Filter Expeditions List
+  // Filter Expeditions List using appliedFilters (only applied when clicking "Apply Filters")
   const filteredExpeditions = expeditions.filter(exp => {
     if (!isAdmin && hiddenPlans.includes(exp.id)) return false;
 
-    const matchesSearch = exp.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          exp.destination.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          exp.startingLocation.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = !appliedFilters.search || 
+                          exp.title?.toLowerCase().includes(appliedFilters.search.toLowerCase()) || 
+                          exp.destination?.toLowerCase().includes(appliedFilters.search.toLowerCase()) ||
+                          exp.startingLocation?.toLowerCase().includes(appliedFilters.search.toLowerCase());
     
     const matchesStatus = statusCategory === "all" || exp.status === statusCategory;
-    const matchesType = selectedType === "All" || exp.travelType === selectedType;
-    const matchesSeason = selectedSeason === "All" || exp.season === selectedSeason;
-    const matchesBudget = exp.targetBudget <= maxBudget;
+    const matchesType = appliedFilters.type === "All" || exp.travelType === appliedFilters.type;
+    const matchesSeason = appliedFilters.season === "All" || exp.season === appliedFilters.season;
+    const matchesBudget = appliedFilters.maxBudget === null || Number(exp.targetBudget || 0) <= appliedFilters.maxBudget;
 
     return matchesSearch && matchesStatus && matchesType && matchesSeason && matchesBudget;
   });
@@ -267,25 +311,34 @@ export default function TourPlans() {
           </div>
 
           {/* Filter Bar */}
-          <div className="card bg-base-100 border border-base-300 p-4 rounded-3xl shadow-sm">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          <div className="card bg-base-100 border border-base-300 p-4 md:p-5 rounded-3xl shadow-sm space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-12 gap-3 items-end">
               
               {/* Search Query */}
-              <div className="form-control sm:col-span-2">
+              <div className="form-control lg:col-span-4">
+                <label className="label py-0.5 px-1">
+                  <span className="label-text text-[11px] font-bold text-base-content/70">Search Destination or Title</span>
+                </label>
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-base-content/40" />
                   <input 
                     type="text" 
-                    placeholder="Search tour by place, city, title..." 
+                    placeholder="e.g. Cox's Bazar, Sajek, Sylhet..." 
                     className="input input-sm input-bordered w-full pl-9 rounded-xl text-xs" 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleApplyFilters();
+                    }}
                   />
                 </div>
               </div>
 
               {/* Travel Style */}
-              <div className="form-control">
+              <div className="form-control lg:col-span-2">
+                <label className="label py-0.5 px-1">
+                  <span className="label-text text-[11px] font-bold text-base-content/70">Travel Style</span>
+                </label>
                 <select 
                   className="select select-sm select-bordered w-full rounded-xl text-xs"
                   value={selectedType}
@@ -296,11 +349,17 @@ export default function TourPlans() {
                   <option value="Solo">Solo Traveler</option>
                   <option value="Couple">Couple Getaway</option>
                   <option value="Family">Family Trip</option>
+                  <option value="Adventure">Adventure</option>
+                  <option value="Nature">Nature</option>
+                  <option value="Luxury">Luxury</option>
                 </select>
               </div>
 
               {/* Season */}
-              <div className="form-control">
+              <div className="form-control lg:col-span-2">
+                <label className="label py-0.5 px-1">
+                  <span className="label-text text-[11px] font-bold text-base-content/70">Season</span>
+                </label>
                 <select 
                   className="select select-sm select-bordered w-full rounded-xl text-xs"
                   value={selectedSeason}
@@ -315,24 +374,89 @@ export default function TourPlans() {
                 </select>
               </div>
 
-              {/* Max Budget Slider */}
-              <div className="form-control flex flex-col justify-center">
-                <div className="flex justify-between items-center text-[10px] font-bold text-base-content/70">
-                  <span>Max Budget</span>
-                  <span className="text-primary font-black">{maxBudget.toLocaleString()} BDT</span>
+              {/* Max Budget Limit (Custom user input - No 60k cap) */}
+              <div className="form-control lg:col-span-2">
+                <label className="label py-0.5 px-1 flex justify-between">
+                  <span className="label-text text-[11px] font-bold text-base-content/70">Max Budget (BDT)</span>
+                  {maxBudget ? (
+                    <span className="text-[10px] text-primary font-bold">{Number(maxBudget).toLocaleString()} ৳</span>
+                  ) : (
+                    <span className="text-[10px] text-base-content/40 font-semibold">No Limit</span>
+                  )}
+                </label>
+                <div className="relative">
+                  <DollarSign className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-base-content/40" />
+                  <input 
+                    type="number" 
+                    placeholder="e.g. 25000" 
+                    min="0"
+                    step="1000"
+                    className="input input-sm input-bordered w-full pl-8 rounded-xl text-xs" 
+                    value={maxBudget}
+                    onChange={(e) => setMaxBudget(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleApplyFilters();
+                    }}
+                  />
                 </div>
-                <input 
-                  type="range" 
-                  min="5000" 
-                  max="60000" 
-                  step="2000"
-                  className="range range-primary range-xs" 
-                  value={maxBudget}
-                  onChange={(e) => setMaxBudget(Number(e.target.value))}
-                />
+              </div>
+
+              {/* Action Buttons: Apply & Reset */}
+              <div className="lg:col-span-2 flex items-center gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={handleApplyFilters}
+                  className="btn btn-sm btn-primary text-primary-content font-bold rounded-xl text-xs flex-1 gap-1 shadow-sm"
+                >
+                  <Filter className="w-3.5 h-3.5" /> Apply
+                </button>
+
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="btn btn-sm btn-ghost border border-base-300 rounded-xl text-xs gap-1"
+                    title="Reset all filters"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
             </div>
+
+            {/* Active Filters Summary Strip */}
+            {hasActiveFilters && (
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-base-200 text-xs">
+                <span className="text-[11px] font-bold text-base-content/50">Active Filters:</span>
+                {appliedFilters.search && (
+                  <span className="badge badge-sm badge-neutral gap-1">
+                    Search: "{appliedFilters.search}"
+                  </span>
+                )}
+                {appliedFilters.type !== "All" && (
+                  <span className="badge badge-sm badge-neutral gap-1">
+                    Style: {appliedFilters.type}
+                  </span>
+                )}
+                {appliedFilters.season !== "All" && (
+                  <span className="badge badge-sm badge-neutral gap-1">
+                    Season: {appliedFilters.season}
+                  </span>
+                )}
+                {appliedFilters.maxBudget !== null && (
+                  <span className="badge badge-sm badge-primary text-primary-content font-bold gap-1">
+                    Max Budget: ≤ {appliedFilters.maxBudget.toLocaleString()} BDT
+                  </span>
+                )}
+                <button
+                  onClick={handleResetFilters}
+                  className="text-[11px] text-error hover:underline ml-auto font-semibold"
+                >
+                  Clear All
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Expeditions Grid */}
