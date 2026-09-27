@@ -179,3 +179,9 @@ class TestAIBuilderToExpeditionFlow:
             "Saved expedition should display stops information"
 
         print(f"[TEST PASSED] AI Package '{generated_title}' is verified to exist on the Expedition page with route stops!")
+
+
+if __name__ == "__main__":
+    import pytest
+    import sys
+    sys.exit(pytest.main(["-v", "-s", __file__]))
