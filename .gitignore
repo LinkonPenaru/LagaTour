@@ -26,6 +26,8 @@ dist-ssr
 *.sw?
 .env
 .env.*
+!.env.example
+!server/.env.example
 env
 server/.env
 Thumbs.db
